@@ -1,14 +1,8 @@
 package com.example.springboot.jwt.config;
 
-import com.example.springboot.jwt.config.filter.CustomAuthenticationFilter;
-import com.example.springboot.jwt.utils.Constants;
-import com.nimbusds.jose.jwk.JWK;
-import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jose.jwk.RSAKey;
-import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
-import com.nimbusds.jose.jwk.source.JWKSource;
-import com.nimbusds.jose.proc.SecurityContext;
-import lombok.RequiredArgsConstructor;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -28,10 +22,20 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.stereotype.Component;
 
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
+import com.example.springboot.jwt.config.filter.CustomAuthenticationFilter;
+import com.example.springboot.jwt.config.filter.CustomAuthorizationFilter;
+import com.example.springboot.jwt.utils.Constants;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.SecurityContext;
+
+import lombok.RequiredArgsConstructor;
 
 @Component
 @EnableWebSecurity
@@ -53,14 +57,17 @@ public class SecurityConfig {
         AuthenticationManagerBuilder authenticationManagerBuilder = http.getSharedObject(AuthenticationManagerBuilder.class);
         authenticationManagerBuilder.userDetailsService(userDetailsService);
         authenticationManager = authenticationManagerBuilder.build();
-        var customAuthenticationFilter = new CustomAuthenticationFilter(authenticationManager);
-        customAuthenticationFilter.setFilterProcessesUrl("/signIn");
+        var customAuthenticationFilter = new CustomAuthenticationFilter(authenticationManager, jwtEncoder());
+        var customAuthorizationFilter = new CustomAuthorizationFilter(jwtEncoder(), jwtDecoder(), userDetailsService);
+        customAuthenticationFilter.setFilterProcessesUrl("/login/signIn");
         // @formatter:off
         http
                 .cors().and().csrf().disable()
                 .authorizeRequests()
                 .antMatchers("/error", "/login/*").permitAll()
-                .antMatchers("/products*").hasAuthority(Constants.ROLE_ADMIN).and()
+                .antMatchers("/products/**").hasAuthority("SCOPE_" + Constants.ROLE_ADMIN) //Checar comentario na linha 95 em CustomAuthorizationFilter
+                .anyRequest().authenticated()
+                .and()
                 .httpBasic(Customizer.withDefaults())
                 .oauth2ResourceServer(OAuth2ResourceServerConfigurer::jwt)
                 .sessionManagement((session) -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -69,7 +76,9 @@ public class SecurityConfig {
                         .accessDeniedHandler(new BearerTokenAccessDeniedHandler())
                 )
                 .authenticationManager(authenticationManager)
-                .addFilter(customAuthenticationFilter);
+                .addFilter(customAuthenticationFilter)
+                .addFilterBefore(customAuthorizationFilter, UsernamePasswordAuthenticationFilter.class)
+                ;
 
         return http.build();
     }
@@ -94,11 +103,5 @@ public class SecurityConfig {
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
-
-//    @Override
-//    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-//        auth.userDetailsService(userDetailsService).passwordEncoder(bCrypt);
-//    }
-
 
 }
